@@ -248,18 +248,24 @@ def _read_mdb(
         dns_table = _get_table(database, "DNS")
         role_table = _get_table(database, "ROLE_ACCESS")
         clients_table = _get_table(database, "CLIENTS")
+
+        if role_table is None:
+            raise LookupError("Table ROLE_ACCESS not found in database")
+        if clients_table is None:
+            raise LookupError("Table CLIENTS not found in database")
+
         events: list[TimelineEvent] = []
-        dns_events = _build_dns_events(dns_table, path)
-        role_events = _build_role_events(role_table, path)
-        client_events = _build_client_events(
-            clients_table=clients_table,
-            source_file=path,
-            anchor_preference=anchor_preference,
-            full_output=full_output,
+        if dns_table is not None:
+            events.extend(_build_dns_events(dns_table, path))
+        events.extend(_build_role_events(role_table, path))
+        events.extend(
+            _build_client_events(
+                clients_table=clients_table,
+                source_file=path,
+                anchor_preference=anchor_preference,
+                full_output=full_output,
+            )
         )
-        events.extend(dns_events)
-        events.extend(role_events)
-        events.extend(client_events)
         return events
 
 
@@ -337,9 +343,9 @@ def _create_clean_temp_copy(path: Path) -> Path | None:
         return None
 
 
-def _get_table(database: pyesedb.file, name: str) -> pyesedb.table:
+def _get_table(database: pyesedb.file, name: str) -> pyesedb.table | None:
     """
-    Return a table by name or raise an informative error.
+    Return a table by name, or ``None`` if it does not exist.
 
     Iterates through all tables in the ESE database to find a match (case-insensitive).
 
@@ -348,17 +354,13 @@ def _get_table(database: pyesedb.file, name: str) -> pyesedb.table:
         name: The name of the table to retrieve.
 
     Returns:
-        The pyesedb.table object if found.
-
-    Raises:
-        LookupError: If the table name is not found in the database.
+        The pyesedb.table object if found, otherwise ``None``.
     """
     for index in range(database.get_number_of_tables()):
         table = database.get_table(index)
         if table.get_name().upper() == name.upper():
             return table
-    msg = f"Table {name} not found in database"
-    raise LookupError(msg)
+    return None
 
 
 def _build_dns_events(
