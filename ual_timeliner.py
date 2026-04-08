@@ -884,7 +884,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--split-rows",
         type=int,
         default=0,
-        help="Split output every N rows (csv/k2t: separate files; xlsx: separate sheets, default 900k, max 1M).",
+        help="Split output into multiple files every N rows (csv/k2t/xlsx).",
     )
     return parser.parse_args(argv)
 
@@ -902,7 +902,7 @@ def write_output(
         df: The Polars DataFrame to write.
         output: Destination Path object (file). Can be None for stdout (CSV only).
         fmt: Output format string.
-        split_rows: If > 0, splits output into chunks of N rows (CSV/K2T).
+        split_rows: If > 0, splits output into chunks of N rows (CSV/K2T/XLSX).
 
     Raises:
         ValueError: If output path is missing for file-based formats.
@@ -915,8 +915,8 @@ def write_output(
             output = output.with_name(f"{stem}-{counter}{suffix}")
             counter += 1
 
-    # Handle splitting for CSV and K2T
-    if split_rows > 0 and output is not None and fmt in ("csv", "k2t"):
+    # Handle file splitting for CSV, K2T, and XLSX
+    if split_rows > 0 and output is not None and fmt in ("csv", "k2t", "xlsx"):
         total_rows = df.height
         if total_rows > split_rows:
             # Determine chunk count
@@ -959,7 +959,7 @@ def write_output(
         df.write_parquet(output)
         return
     if fmt == "xlsx":
-        _write_xlsx(df, output, split_rows=split_rows)
+        _write_xlsx(df, output)
         return
     if fmt == "sqlite":
         _write_sqlite(df, output)
@@ -975,7 +975,7 @@ def write_output(
     raise ValueError(msg)
 
 
-def _write_xlsx(df: pl.DataFrame, output: Path, split_rows: int = 0) -> None:
+def _write_xlsx(df: pl.DataFrame, output: Path) -> None:
     """
     Write the timeline to XLSX with sheet splitting and auto-filter.
 
@@ -983,20 +983,16 @@ def _write_xlsx(df: pl.DataFrame, output: Path, split_rows: int = 0) -> None:
     disk incrementally instead of building the full workbook in memory.
 
     Excel has a row limit (approx 1M). This function splits the DataFrame into
-    multiple worksheets if it exceeds the configured rows-per-sheet limit.
+    multiple worksheets if it exceeds 900,000 rows.
 
     Args:
         df: The Polars DataFrame.
         output: The target .xlsx file path.
-        split_rows: Rows per sheet. Defaults to 900,000, capped at 1,000,000.
     """
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
 
-    if split_rows > 0:
-        max_rows_per_sheet = min(split_rows, 1_000_000)
-    else:
-        max_rows_per_sheet = 900_000
+    max_rows_per_sheet = 900_000
     total_rows = df.height
     workbook = Workbook(write_only=True)
     sheet_count = max(1, (total_rows + max_rows_per_sheet - 1) // max_rows_per_sheet)
