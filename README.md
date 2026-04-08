@@ -12,7 +12,7 @@ Originally derived from [KStrike](https://github.com/brimorlabs/KStrike) by BriM
 - **High Performance**: Built on [Polars](https://pola.rs/) for fast processing of large UAL datasets.
 - **Standardized Output**: Export to CSV, Excel (XLSX), SQLite, Parquet, or K2T (Timesketch JSONL).
 - **Deduplication**: Intelligently handles overlapping data between `Current.mdb` and historical GUID databases.
-- **Role GUID Resolution**: Maps 21 known Windows Server role GUIDs to human-readable names.
+- **Role GUID Resolution**: Maps known Windows Server role GUIDs to human-readable names.
 
 ## Installation
 
@@ -105,8 +105,8 @@ Data is retained for up to 3 years and covers roles including File Server, AD DS
 
 For more information:
 
-- [Microsoft: Get Started with User Access Logging](https://learn.microsoft.com/windows-server/administration/user-access-logging/get-started-with-user-access-logging)
 - [KStrike article on UAL forensics](https://dfir-kev.medium.com/kstrike-2aff53eaecce)
+- [Microsoft: Get Started with User Access Logging](https://learn.microsoft.com/windows-server/administration/user-access-logging/get-started-with-user-access-logging)
 
 ### Sample Data
 
