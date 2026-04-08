@@ -1,0 +1,69 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "mapping": {
+        "total_fields": {
+          "limit": 1000
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "datetime": {
+        "type": "date"
+      },
+      "message": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "timestamp_desc": {
+        "type": "keyword"
+      },
+      "source_table": {
+        "type": "keyword"
+      },
+      "authenticated_user": {
+        "type": "keyword"
+      },
+      "ip_address": {
+        "type": "ip",
+        "ignore_malformed": true
+      },
+      "host_name": {
+        "type": "keyword"
+      },
+      "user": {
+        "type": "keyword"
+      },
+      "access_count": {
+        "type": "long"
+      },
+      "total_accesses": {
+        "type": "long"
+      },
+      "role_name": {
+        "type": "keyword"
+      },
+      "role_guid": {
+        "type": "keyword"
+      },
+      "tenant_id": {
+        "type": "keyword"
+      },
+      "client_name": {
+        "type": "keyword"
+      },
+      "source_file": {
+        "type": "keyword"
+      }
+    }
+  }
+}

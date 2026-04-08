@@ -1,0 +1,37 @@
+[project]
+name = "ual_timeliner"
+version = "0.1.0"
+description = "UAL Timeline Generator — Build forensic timelines from Windows User Access Logging databases"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Kevin Stokes"}]
+requires-python = ">=3.9"
+keywords = ["ual", "forensics", "dfir", "timeline", "windows", "ese", "user-access-logging"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dependencies = [
+    "polars>=1.0.0",
+    "libesedb-python>=2024.0",
+    "openpyxl>=3.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/kev365/ual-timeliner"
+Issues = "https://github.com/kev365/ual-timeliner/issues"
+
+[project.scripts]
+ual-timeliner = "ual_timeliner:main"
+
+[tool.setuptools]
+py-modules = ["ual_timeliner"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,61 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Testing & Coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+htmlcov/
+
+# --- IDEs & Editors ---
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+.cursorignore
+.cursorindexingignore
+.claude/
+
+# --- Project Structure ---
+tests/
+scripts/
+docs/
+CHANGELOG.md
+
+# --- Local Data & Outputs ---
+outputs/
+!outputs/.gitkeep
+
+*.csv
+*.parquet
+*.jsonl
+*.db
+*.sqlite
+*.xlsx
+*.log
+
+# --- Build & Environment ---
+*.spec
+dist/
+.env
+.envrc
+.pdm-python
+.python-version
