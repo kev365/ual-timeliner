@@ -1116,6 +1116,7 @@ def _write_k2t_jsonl(df: pl.DataFrame, output: Path) -> None:
     required_fields = {"timestamp", "timestamp_desc"}
     columns = df.columns
     extras = [col for col in columns if col not in required_fields]
+    message_fields = [col for col in extras if col != "source_file"]
     with output.open("w", encoding="utf-8") as handle:
         for row in df.iter_rows(named=True):
             ts = row.get("timestamp")
@@ -1124,7 +1125,7 @@ def _write_k2t_jsonl(df: pl.DataFrame, output: Path) -> None:
             else:
                 dt_value = None
             payload: dict[str, Any] = {
-                "message": _build_message(row, extras),
+                "message": _build_message(row, message_fields),
                 "datetime": dt_value,
                 "timestamp_desc": row.get("timestamp_desc"),
             }
@@ -1150,7 +1151,7 @@ def _build_message(row: dict[str, Any], fields: list[str]) -> str:
         else:
             rendered = str(value)
         parts.append(f"{key}={rendered}")
-    return "; ".join(parts)
+    return ("\n| ").join(parts)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
