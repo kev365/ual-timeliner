@@ -884,7 +884,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--split-rows",
         type=int,
         default=0,
-        help="Split output into multiple files every N rows (csv/k2t only).",
+        help="Split output every N rows (csv/k2t: separate files; xlsx: separate sheets, default 900k, max 1M).",
     )
     return parser.parse_args(argv)
 
@@ -959,7 +959,7 @@ def write_output(
         df.write_parquet(output)
         return
     if fmt == "xlsx":
-        _write_xlsx(df, output)
+        _write_xlsx(df, output, split_rows=split_rows)
         return
     if fmt == "sqlite":
         _write_sqlite(df, output)
@@ -975,7 +975,7 @@ def write_output(
     raise ValueError(msg)
 
 
-def _write_xlsx(df: pl.DataFrame, output: Path) -> None:
+def _write_xlsx(df: pl.DataFrame, output: Path, split_rows: int = 0) -> None:
     """
     Write the timeline to XLSX with sheet splitting and auto-filter.
 
@@ -983,16 +983,20 @@ def _write_xlsx(df: pl.DataFrame, output: Path) -> None:
     disk incrementally instead of building the full workbook in memory.
 
     Excel has a row limit (approx 1M). This function splits the DataFrame into
-    multiple worksheets if it exceeds 900,000 rows.
+    multiple worksheets if it exceeds the configured rows-per-sheet limit.
 
     Args:
         df: The Polars DataFrame.
         output: The target .xlsx file path.
+        split_rows: Rows per sheet. Defaults to 900,000, capped at 1,000,000.
     """
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
 
-    max_rows_per_sheet = 900_000
+    if split_rows > 0:
+        max_rows_per_sheet = min(split_rows, 1_000_000)
+    else:
+        max_rows_per_sheet = 900_000
     total_rows = df.height
     workbook = Workbook(write_only=True)
     sheet_count = max(1, (total_rows + max_rows_per_sheet - 1) // max_rows_per_sheet)
