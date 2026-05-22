@@ -6,17 +6,28 @@ Originally derived from [KStrike](https://github.com/brimorlabs/KStrike) by BriM
 
 ## Features
 
-- **Multi-Table Extraction**: Parses `CLIENTS`, `DNS`, and `ROLE_ACCESS` tables from UAL ESE databases.
+- **Multi-Table Extraction**: Parses `CLIENTS`, `DNS` (optional), and `ROLE_ACCESS` tables from UAL ESE databases.
 - **Dirty Database Recovery**: Automatically patches ESE databases in Dirty Shutdown state for offline parsing.
 - **Timestamp Correlation**: Merges `InsertDate`, `LastAccess`, `FirstSeen`, `LastSeen`, and historical `Day###` columns into a unified chronological view.
+- **Neighbor Host Enrichment**: Fills blank `host_name` on `CLIENTS` rows when the closest machine-account rows at the same IP (one before, one after) agree on a hostname. Disable with `--no-enrich-neighbors`.
 - **High Performance**: Built on [Polars](https://pola.rs/) for fast processing of large UAL datasets.
 - **Standardized Output**: Export to CSV, Excel (XLSX), SQLite, Parquet, or K2T (Timesketch JSONL).
+- **X-Ways X-Tension Output**: Dedicated `--xways` mode produces a SQLite database tailored for the X-Ways X-Tension.
 - **Deduplication**: Intelligently handles overlapping data between `Current.mdb` and historical GUID databases.
 - **Role GUID Resolution**: Maps known Windows Server role GUIDs to human-readable names.
 
 ## Installation
 
-Requires Python 3.9+.
+### Option 1 — Pre-built Windows binary (recommended for most users)
+
+Download `ual-timeliner.exe` from the [latest release](https://github.com/kev365/ual-timeliner/releases/latest). No Python install required.
+
+```powershell
+ual-timeliner.exe --help
+ual-timeliner.exe -V
+```
+
+### Option 2 — From source (Python 3.9+)
 
 ```bash
 # Clone the repository and install
@@ -26,7 +37,7 @@ pip install -e .
 ual-timeliner --help
 ```
 
-### Dependencies
+### Dependencies (source install)
 
 - `polars` — High-performance DataFrame library
 - `libesedb-python` — For reading ESE (.mdb) databases
@@ -44,12 +55,32 @@ ual-timeliner path/to/UAL_data/ -f xlsx -o timeline.xlsx
 # Recursive search with full forensic output (all columns + Day### entries)
 ual-timeliner path/to/UAL_data/ -r --full-output -f parquet -o timeline.parquet
 
-# Split large output into multiple files (CSV and K2T only)
+# Split large output into multiple files (CSV, K2T, and XLSX)
 ual-timeliner path/to/UAL_data/ -f csv -o timeline.csv --split-rows 100000
+
+# Produce a SQLite database for the X-Ways X-Tension
+ual-timeliner path/to/UAL_data/ --xways -o timeline.sqlite
+
+# Disable neighbor-based host_name enrichment
+ual-timeliner path/to/UAL_data/ --no-enrich-neighbors -o timeline.csv
 
 # Single file input
 ual-timeliner path/to/Current.mdb -o timeline.csv
 ```
+
+### CLI Flags
+
+| Flag | Description |
+| :--- | :--- |
+| `-o`, `--output PATH` | Output file path. Required for parquet, xlsx, sqlite, k2t. |
+| `-f`, `--format` | `csv` (default), `parquet`, `xlsx`, `sqlite`, `k2t`. |
+| `-r`, `--recursive` | Recursively search subdirectories for `.mdb` files. |
+| `--full-output` | Include extra columns (`role_guid`, `client_name`, `tenant_id`, `access_count`) and parse `Day###` historical entries. |
+| `--no-dedup` | Disable deduplication between `Current.mdb` and GUID databases. |
+| `--no-enrich-neighbors` | Disable blank `host_name` fill on CLIENTS rows. |
+| `--split-rows N` | Split output every N rows into separate files (`csv`, `k2t`, `xlsx`). |
+| `--xways` | Produce SQLite output tailored for the X-Ways X-Tension. Forces `-f sqlite`; requires `-o`. |
+| `-V`, `--version` | Print version and exit. |
 
 ### Sample Output (Default)
 
@@ -90,6 +121,10 @@ When using `-f k2t`, a dedicated OpenSearch mapping file is provided at:
 `resources/ual-timeliner-opensearch-mapping.json`
 
 This ensures fields like `ip_address` (type: `ip`) and `datetime` (type: `date`) are correctly typed in OpenSearch for Timesketch ingestion.
+
+## Building the Windows binary
+
+To build `ual-timeliner.exe` yourself, run [`build.bat`](build.bat) on Windows. It creates a `.venv`, installs requirements + PyInstaller, generates `version_info.txt` from `__version__`, and emits `dist\ual-timeliner.exe`.
 
 ## UAL Background
 

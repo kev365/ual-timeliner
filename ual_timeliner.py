@@ -26,6 +26,8 @@ from uuid import UUID
 import polars as pl
 import pyesedb
 
+__version__ = "0.2.0"
+
 # --- Constants & Configuration ---
 # GUID_LOOKUP maps known RoleGUIDs to human-readable Role Names.
 # These GUIDs identify specific Windows Server roles installed on the system.
@@ -145,10 +147,12 @@ def build_timeline_from_directory(
     deduplicate: bool = True,
     full_output: bool = False,
     recursive: bool = False,
+    enrich_neighbors: bool = True,
+    xways: bool = False,
 ) -> pl.DataFrame:
     """
     Build a timeline DataFrame from every eligible .mdb in a directory.
-    
+
     This function locates all .mdb files in the specified root directory (and subdirectories
     if recursive is True), parses them, and aggregates the results into a single Polars DataFrame.
     It handles file discovery and delegates the parsing logic to `build_timeline`.
@@ -159,6 +163,8 @@ def build_timeline_from_directory(
         anchor_preference=anchor_preference,
         deduplicate=deduplicate,
         full_output=full_output,
+        enrich_neighbors=enrich_neighbors,
+        xways=xways,
     )
 
 
@@ -167,6 +173,8 @@ def build_timeline(
     anchor_preference: AnchorPreference = "insert_then_last",
     deduplicate: bool = True,
     full_output: bool = False,
+    enrich_neighbors: bool = True,
+    xways: bool = False,
 ) -> pl.DataFrame:
     """
     Build a timeline DataFrame from one or more .mdb files.
@@ -183,6 +191,12 @@ def build_timeline(
     Returns:
         A Polars DataFrame containing the processed timeline data.
     """
+    # --xways needs Day### parsing (like --full-output) but always emits the
+    # 10-column default schema. When both --full-output and --xways are set,
+    # --xways wins on the column-set decision and the extras are dropped.
+    parse_day_data = full_output or xways
+    keep_extra_columns = full_output and not xways
+
     frames: list[pl.DataFrame] = []
     for path in paths:
         print(f"[*] Processing: {path.resolve()}", file=sys.stderr)
@@ -190,7 +204,7 @@ def build_timeline(
             events = _read_mdb(
                 path,
                 anchor_preference=anchor_preference,
-                full_output=full_output,
+                full_output=parse_day_data,
             )
         except Exception as e:
             error_str = str(e)
@@ -210,8 +224,10 @@ def build_timeline(
         del frames
         if deduplicate:
             df = _deduplicate_timeline(df)
+        if enrich_neighbors:
+            df = _enrich_neighbors(df)
         df = df.sort(["timestamp", "timestamp_desc"])
-    if not full_output:
+    if not keep_extra_columns:
         exclude_cols = ["role_guid", "client_name", "tenant_id", "access_count"]
         df = df.drop([c for c in exclude_cols if c in df.columns])
     return df
@@ -630,6 +646,65 @@ def _deduplicate_timeline(df: pl.DataFrame) -> pl.DataFrame:
     return unique.drop("_dedup_priority")
 
 
+def _enrich_neighbors(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Bracket-fill blank ``host_name`` on CLIENTS InsertDate/LastAccess rows.
+
+    A blank ``host_name`` is filled only when the closest CLIENTS-machine-account
+    rows at the same IP — one before, one after in timeline order — agree on
+    a hostname. Both sides must exist and agree; otherwise the cell stays
+    blank. Day* rows and DNS rows are excluded entirely (neither anchor
+    evidence nor fill targets).
+
+    The ``user`` column is intentionally not enriched. Machine-account rows
+    represent the computer authenticating (services, scheduled tasks, NTLM
+    machine handshake, etc.); attributing a user to those events would imply
+    a user action we cannot prove from UAL alone.
+    """
+    required = {
+        "timestamp", "ip_address", "host_name", "source_table",
+        "timestamp_desc",
+    }
+    if not required.issubset(df.columns) or df.height == 0:
+        return df
+
+    indexed = df.with_row_index("_row_idx")
+
+    eligible_mask = (
+        (pl.col("source_table") == "CLIENTS")
+        & pl.col("timestamp_desc").is_in(["InsertDate", "LastAccess"])
+        & pl.col("ip_address").is_not_null()
+    )
+
+    if indexed.filter(eligible_mask).height == 0:
+        return df
+
+    eligible_for_host = indexed.filter(eligible_mask).sort(["ip_address", "timestamp"])
+    host_fills = (
+        eligible_for_host.with_columns(
+            pl.col("host_name").forward_fill().over("ip_address").alias("_prev_host"),
+            pl.col("host_name").backward_fill().over("ip_address").alias("_next_host"),
+        )
+        .with_columns(
+            pl.when(
+                pl.col("host_name").is_null()
+                & pl.col("_prev_host").is_not_null()
+                & (pl.col("_prev_host") == pl.col("_next_host"))
+            )
+            .then(pl.col("_prev_host"))
+            .otherwise(None)
+            .alias("_filled_host"),
+        )
+        .select(["_row_idx", "_filled_host"])
+    )
+
+    return (
+        indexed.join(host_fills, on="_row_idx", how="left")
+        .with_columns(pl.coalesce(["host_name", "_filled_host"]).alias("host_name"))
+        .drop(["_row_idx", "_filled_host"])
+    )
+
+
 def _column_map(table: pyesedb.table) -> dict[str, int]:
     """
     Return a mapping of column name to index.
@@ -843,6 +918,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         description="ual_timeliner: Build a UTC timeline from Windows UAL ESE databases."
     )
     parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+    parser.add_argument(
         "path",
         type=Path,
         help="Directory containing UAL .mdb files (Current.mdb and GUID.mdb).",
@@ -872,7 +953,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--full-output",
         action="store_true",
-        help="Include all output columns, parses Day### data, and no deduplication.",
+        help=(
+            "Include all output columns (role_guid, client_name, tenant_id, "
+            "access_count) and parse Day### historical access entries. "
+            "Deduplication still applies; combine with --no-dedup to disable."
+        ),
     )
     parser.add_argument(
         "-r",
@@ -886,7 +971,46 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=0,
         help="Split output into multiple files every N rows (csv/k2t/xlsx).",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--no-enrich-neighbors",
+        action="store_true",
+        help=(
+            "Disable neighbor-based enrichment. By default, blank host_name on "
+            "CLIENTS InsertDate/LastAccess rows is filled when the closest "
+            "CLIENTS-machine-account rows at the same IP — one before, one "
+            "after in timeline order — agree. Day* and DNS rows are excluded. "
+            "The user column is never enriched."
+        ),
+    )
+    parser.add_argument(
+        "--xways",
+        action="store_true",
+        help=(
+            "Produce a SQLite database tailored for the X-Ways X-Tension. "
+            "Forces --format sqlite, requires --output. Parses Day### data "
+            "(like --full-output) but always emits the 10-column default "
+            "schema (drops role_guid, client_name, tenant_id, access_count). "
+            "If --full-output is also passed, --xways wins on the column set."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    if args.xways:
+        if args.format != "sqlite":
+            # Default is csv; if the user picked anything other than sqlite,
+            # the request is contradictory. Friendliest fix: error so they
+            # don't get a surprise CSV when they asked for X-Ways output.
+            if args.format == "csv":
+                # Most likely they just didn't think to pass -f sqlite. Override.
+                args.format = "sqlite"
+            else:
+                parser.error(
+                    "--xways requires --format sqlite (or omit --format)."
+                )
+        if args.output is None:
+            parser.error("--xways requires --output / -o.")
+
+    return args
 
 
 def write_output(
@@ -1019,78 +1143,45 @@ def _write_xlsx(df: pl.DataFrame, output: Path) -> None:
 
 def _write_sqlite(df: pl.DataFrame, output: Path) -> None:
     """
-    Write the timeline to a SQLite database.
+    Write the timeline to a SQLite database (table 'timeline').
 
-    Creates a table named 'timeline' and inserts all records.
-    If the table exists, it appends data.
-
-    Args:
-        df: The Polars DataFrame.
-        output: The target .sqlite file path.
+    The table schema mirrors the columns present in the DataFrame, so the
+    output reflects whatever column set the caller produced (10-column default,
+    14-column ``--full-output``, or the X-Ways subset).
     """
+    int_dtypes = {
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+    }
+    float_dtypes = {pl.Float32, pl.Float64}
+
+    def sql_type(dtype: pl.PolarsDataType) -> str:
+        if dtype in int_dtypes:
+            return "INTEGER"
+        if dtype in float_dtypes:
+            return "REAL"
+        return "TEXT"
+
+    columns = list(df.columns)
+    col_defs = ", ".join(f'"{c}" {sql_type(df.schema[c])}' for c in columns)
+    insert_cols = ", ".join(f'"{c}"' for c in columns)
+    placeholders = ", ".join("?" * len(columns))
+    create_sql = f"CREATE TABLE IF NOT EXISTS timeline ({col_defs})"
+    insert_sql = f"INSERT INTO timeline ({insert_cols}) VALUES ({placeholders})"
+
     connection = sqlite3.connect(output)
     try:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS timeline (
-                "timestamp (UTC)" TEXT,
-                timestamp_desc TEXT,
-                source_table TEXT,
-                authenticated_user TEXT,
-                ip_address TEXT,
-                host_name TEXT,
-                user TEXT,
-                access_count INTEGER,
-                total_accesses INTEGER,
-                role_name TEXT,
-                role_guid TEXT,
-                tenant_id TEXT,
-                client_name TEXT,
-                source_file TEXT
-            )
-            """
-        )
-        insert_sql = """
-            INSERT INTO timeline (
-                "timestamp (UTC)",
-                timestamp_desc,
-                source_table,
-                authenticated_user,
-                ip_address,
-                host_name,
-                user,
-                access_count,
-                total_accesses,
-                role_name,
-                role_guid,
-                tenant_id,
-                client_name,
-                source_file
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
+        connection.execute(create_sql)
         batch_size = 10_000
         batch: list[tuple[Any, ...]] = []
         for row in df.iter_rows(named=True):
-            ts = row.get("timestamp (UTC)")
-            ts_str = ts.isoformat() if isinstance(ts, datetime) else None
-            batch.append(
-                (
-                    ts_str,
-                    row.get("timestamp_desc"),
-                    row.get("source_table"),
-                    row.get("authenticated_user"),
-                    row.get("ip_address"),
-                    row.get("host_name"),
-                    row.get("user"),
-                    row.get("access_count"),
-                    row.get("total_accesses"),
-                    row.get("role_name"),
-                    row.get("role_guid"),
-                    row.get("tenant_id"),
-                    row.get("client_name"),
-                    row.get("source_file"),
-                )
-            )
+            values: list[Any] = []
+            for col in columns:
+                value = row.get(col)
+                if isinstance(value, datetime):
+                    value = value.isoformat()
+                values.append(value)
+            batch.append(tuple(values))
             if len(batch) >= batch_size:
                 connection.executemany(insert_sql, batch)
                 batch.clear()
@@ -1162,6 +1253,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         deduplicate=not args.no_dedup,
         full_output=args.full_output,
         recursive=args.recursive,
+        enrich_neighbors=not args.no_enrich_neighbors,
+        xways=args.xways,
     )
     write_output(timeline, args.output, args.format, split_rows=args.split_rows)
     return 0
